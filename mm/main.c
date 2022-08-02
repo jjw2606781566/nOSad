@@ -1,10 +1,5 @@
 /*************************************************************************//**
- *****************************************************************************
- * @file   mm/main.c
- * @brief  Orange'S Memory Management.
- * @author Forrest Y. Yu
- * @date   Tue May  6 00:33:39 2008
- *****************************************************************************
+				内存管理主体
  *****************************************************************************/
 
 #include "type.h"
@@ -26,11 +21,7 @@ PUBLIC void do_fork_test();
 PRIVATE void init_mm();
 
 /*****************************************************************************
- *                                task_mm
- *****************************************************************************/
-/**
- * <Ring 1> The main loop of TASK MM.
- * 
+				   循环主体
  *****************************************************************************/
 PUBLIC void task_mm()
 {
@@ -72,11 +63,7 @@ PUBLIC void task_mm()
 }
 
 /*****************************************************************************
- *                                init_mm
- *****************************************************************************/
-/**
- * Do some initialization work.
- * 
+				    初始化
  *****************************************************************************/
 PRIVATE void init_mm()
 {
@@ -90,15 +77,7 @@ PRIVATE void init_mm()
 }
 
 /*****************************************************************************
- *                                alloc_mem
- *****************************************************************************/
-/**
- * Allocate a memory block for a proc.
- * 
- * @param pid  Which proc the memory is for.
- * @param memsize  How many bytes is needed.
- * 
- * @return  The base of the memory just allocated.
+				为进程分配内存块
  *****************************************************************************/
 PUBLIC int alloc_mem(int pid, int memsize)
 {
@@ -120,17 +99,7 @@ PUBLIC int alloc_mem(int pid, int memsize)
 }
 
 /*****************************************************************************
- *                                free_mem
- *****************************************************************************/
-/**
- * Free a memory block. Because a memory block is corresponding with a PID, so
- * we don't need to really `free' anything. In another word, a memory block is
- * dedicated to one and only one PID, no matter what proc actually uses this
- * PID.
- * 
- * @param pid  Whose memory is to be freed.
- * 
- * @return  Zero if success.
+				释放某PID对应的内存块
  *****************************************************************************/
 PUBLIC int free_mem(int pid)
 {
