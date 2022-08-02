@@ -1,10 +1,5 @@
 /*************************************************************************//**
- *****************************************************************************
- * @file   forkexit.c
- * @brief  
- * @author Forrest Y. Yu
- * @date   Tue May  6 00:37:15 2008
- *****************************************************************************
+		fork()生成、exit()退出子进程，wait()返回父进程所需参数
  *****************************************************************************/
 
 #include "type.h"
@@ -24,16 +19,11 @@
 PRIVATE void cleanup(struct proc * proc);
 
 /*****************************************************************************
- *                                do_fork
- *****************************************************************************/
-/**
- * Perform the fork() syscall.
- * 
- * @return  Zero if success, otherwise -1.
+                                 执行fork（）系统调用
  *****************************************************************************/
 PUBLIC int do_fork()
 {
-	/* find a free slot in proc_table */
+	/* 在proc_表中查找空插槽 */
 	struct proc* p = proc_table;
 	int i;
 	for (i = 0; i < NR_TASKS + NR_PROCS; i++,p++)
@@ -47,7 +37,7 @@ PUBLIC int do_fork()
 		return -1;
 	assert(i < NR_TASKS + NR_PROCS);
 
-	/* duplicate the process table */
+	/* 复制进程表 */
 	int pid = mm_msg.source;
 	u16 child_ldt_sel = p->ldt_sel;
 	*p = proc_table[pid];
@@ -55,54 +45,51 @@ PUBLIC int do_fork()
 	p->p_parent = pid;
 	sprintf(p->name, "%s_%d", proc_table[pid].name, child_pid);
 
-	/* duplicate the process: T, D & S */
+	/* 复制进程: T, D & S */
 	struct descriptor * ppd;
 
-	/* Text segment */
+	/* 文本段 */
 	ppd = &proc_table[pid].ldts[INDEX_LDT_C];
-	/* base of T-seg, in bytes */
+	/* T-seg的基数，字节 */
 	int caller_T_base  = reassembly(ppd->base_high, 24,
 					ppd->base_mid,  16,
 					ppd->base_low);
-	/* limit of T-seg, in 1 or 4096 bytes,
-	   depending on the G bit of descriptor */
+	/* T段的限制，以1或4096字节为单位，取决于描述符的G位 */
 	int caller_T_limit = reassembly(0, 0,
 					(ppd->limit_high_attr2 & 0xF), 16,
 					ppd->limit_low);
-	/* size of T-seg, in bytes */
+	/* T段的大小（字节） */
 	int caller_T_size  = ((caller_T_limit + 1) *
 			      ((ppd->limit_high_attr2 & (DA_LIMIT_4K >> 8)) ?
 			       4096 : 1));
 
-	/* Data & Stack segments */
+	/* 数据段和堆栈段 */
 	ppd = &proc_table[pid].ldts[INDEX_LDT_RW];
 	/* base of D&S-seg, in bytes */
 	int caller_D_S_base  = reassembly(ppd->base_high, 24,
 					  ppd->base_mid,  16,
 					  ppd->base_low);
-	/* limit of D&S-seg, in 1 or 4096 bytes,
-	   depending on the G bit of descriptor */
+	/* D和S段的限制，以1或4096字节为单位，取决于描述符的G位 */
 	int caller_D_S_limit = reassembly((ppd->limit_high_attr2 & 0xF), 16,
 					  0, 0,
 					  ppd->limit_low);
-	/* size of D&S-seg, in bytes */
+	/* D和S段的大小（字节） */
 	int caller_D_S_size  = ((caller_T_limit + 1) *
 				((ppd->limit_high_attr2 & (DA_LIMIT_4K >> 8)) ?
 				 4096 : 1));
 
-	/* we don't separate T, D & S segments, so we have: */
+	/* 不分离t、D和S段 */
 	assert((caller_T_base  == caller_D_S_base ) &&
 	       (caller_T_limit == caller_D_S_limit) &&
 	       (caller_T_size  == caller_D_S_size ));
 
-	/* base of child proc, T, D & S segments share the same space,
-	   so we allocate memory just once */
+	/* 子进程、T、D和S段的基数共享相同的空间，所以只分配一次内存 */
 	int child_base = alloc_mem(child_pid, caller_T_size);
 
-	/* child is a copy of the parent */
+	/* 子进程是父进程的复制 */
 	phys_copy((void*)child_base, (void*)caller_T_base, caller_T_size);
 
-	/* child's LDT */
+	/* 子进程的LDT描述符 */
 	init_desc(&p->ldts[INDEX_LDT_C],
 		  child_base,
 		  (PROC_IMAGE_SIZE_DEFAULT - 1) >> LIMIT_4K_SHIFT,
@@ -112,16 +99,16 @@ PUBLIC int do_fork()
 		  (PROC_IMAGE_SIZE_DEFAULT - 1) >> LIMIT_4K_SHIFT,
 		  DA_LIMIT_4K | DA_32 | DA_DRW | PRIVILEGE_USER << 5);
 
-	/* tell FS, see fs_fork() */
+	/* 将信息传给FS */
 	MESSAGE msg2fs;
 	msg2fs.type = FORK;
 	msg2fs.PID = child_pid;
 	send_recv(BOTH, TASK_FS, &msg2fs);
 
-	/* child PID will be returned to the parent proc */
+	/* 将子进程PID将返回到父进程 */
 	mm_msg.PID = child_pid;
 
-	/* birth of the child */
+	/* 生存子进程 */
 	MESSAGE m;
 	m.type = SYSCALL_RET;
 	m.RETVAL = 0;
@@ -132,54 +119,17 @@ PUBLIC int do_fork()
 }
 
 /*****************************************************************************
- *                                do_exit
- *****************************************************************************/
-/**
- * Perform the exit() syscall.
- *
- * If proc A calls exit(), then MM will do the following in this routine:
- *     <1> inform FS so that the fd-related things will be cleaned up
- *     <2> free A's memory
- *     <3> set A.exit_status, which is for the parent
- *     <4> depends on parent's status. if parent (say P) is:
- *           (1) WAITING
- *                 - clean P's WAITING bit, and
- *                 - send P a message to unblock it
- *                 - release A's proc_table[] slot
- *           (2) not WAITING
- *                 - set A's HANGING bit
- *     <5> iterate proc_table[], if proc B is found as A's child, then:
- *           (1) make INIT the new parent of B, and
- *           (2) if INIT is WAITING and B is HANGING, then:
- *                 - clean INIT's WAITING bit, and
- *                 - send INIT a message to unblock it
- *                 - release B's proc_table[] slot
- *               else
- *                 if INIT is WAITING but B is not HANGING, then
- *                     - B will call exit()
- *                 if B is HANGING but INIT is not WAITING, then
- *                     - INIT will call wait()
- *
- * TERMs:
- *     - HANGING: everything except the proc_table entry has been cleaned up.
- *     - WAITING: a proc has at least one child, and it is waiting for the
- *                child(ren) to exit()
- *     - zombie: say P has a child A, A will become a zombie if
- *         - A exit(), and
- *         - P does not wait(), neither does it exit(). that is to say, P just
- *           keeps running without terminating itself or its child
- * 
- * @param status  Exiting status for parent.
- * 
+                                执行exit（）退出子进程
+ 				  流程说明请参考文档
  *****************************************************************************/
 PUBLIC void do_exit(int status)
 {
 	int i;
-	int pid = mm_msg.source; /* PID of caller */
+	int pid = mm_msg.source; /* 调用者的PID */
 	int parent_pid = proc_table[pid].p_parent;
 	struct proc * p = &proc_table[pid];
 
-	/* tell FS, see fs_exit() */
+	/* 将信息传给FS */
 	MESSAGE msg2fs;
 	msg2fs.type = EXIT;
 	msg2fs.PID = pid;
@@ -189,15 +139,15 @@ PUBLIC void do_exit(int status)
 
 	p->exit_status = status;
 
-	if (proc_table[parent_pid].p_flags & WAITING) { /* parent is waiting */
+	if (proc_table[parent_pid].p_flags & WAITING) { /* 父进程正在WAITING */
 		proc_table[parent_pid].p_flags &= ~WAITING;
 		cleanup(&proc_table[pid]);
 	}
-	else { /* parent is not waiting */
+	else { /* 父进程不在WAITING */
 		proc_table[pid].p_flags |= HANGING;
 	}
 
-	/* if the proc has any child, make INIT the new parent */
+	/* 如果该进程有子进程，则将INIT设为新的父进程 */
 	for (i = 0; i < NR_TASKS + NR_PROCS; i++) {
 		if (proc_table[i].p_parent == pid) { /* is a child */
 			proc_table[i].p_parent = INIT;
@@ -211,14 +161,9 @@ PUBLIC void do_exit(int status)
 }
 
 /*****************************************************************************
- *                                cleanup
- *****************************************************************************/
-/**
- * Do the last jobs to clean up a proc thoroughly:
- *     - Send proc's parent a message to unblock it, and
- *     - release proc's proc_table[] entry
- * 
- * @param proc  Process to clean up.
+				 彻底清理进程：
+
+	   向proc的父级发送一条消息以解除阻止，并且释放proc的proc_表[]项
  *****************************************************************************/
 PRIVATE void cleanup(struct proc * proc)
 {
@@ -232,23 +177,9 @@ PRIVATE void cleanup(struct proc * proc)
 }
 
 /*****************************************************************************
- *                                do_wait
- *****************************************************************************/
-/**
- * Perform the wait() syscall.
- *
- * If proc P calls wait(), then MM will do the following in this routine:
- *     <1> iterate proc_table[],
- *         if proc A is found as P's child and it is HANGING
- *           - reply to P (cleanup() will send P a messageto unblock it)
- *           - release A's proc_table[] entry
- *           - return (MM will go on with the next message loop)
- *     <2> if no child of P is HANGING
- *           - set P's WAITING bit
- *     <3> if P has no child at all
- *           - reply to P with error
- *     <4> return (MM will go on with the next message loop)
- *
+                           	  执行wait（）
+ 			      流程说明请参考文档
+ 
  *****************************************************************************/
 PUBLIC void do_wait()
 {
@@ -268,11 +199,11 @@ PUBLIC void do_wait()
 	}
 
 	if (children) {
-		/* has children, but no child is HANGING */
+		/* 有子进程，但没有子进程处于HANGING状态 */
 		proc_table[pid].p_flags |= WAITING;
 	}
 	else {
-		/* no child at all */
+		/* 没有子进程 */
 		MESSAGE msg;
 		msg.type = SYSCALL_RET;
 		msg.PID = NO_TASK;
