@@ -1,10 +1,5 @@
 /*************************************************************************//**
- *****************************************************************************
- * @file   mm/exec.c
- * @brief  
- * @author Forrest Y. Yu
- * @date   Tue May  6 14:14:02 2008
- *****************************************************************************
+				 调用子进程
  *****************************************************************************/
 
 #include "type.h"
@@ -23,16 +18,11 @@
 
 
 /*****************************************************************************
- *                                do_exec
- *****************************************************************************/
-/**
- * Perform the exec() system call.
- * 
- * @return  Zero if successful, otherwise -1.
+ *                            执行exec()系统调用
  *****************************************************************************/
 PUBLIC int do_exec()
 {
-	/* get parameters from the message */
+	/* 获取传参 */
 	int name_len = mm_msg.NAME_LEN;	/* length of filename */
 	int src = mm_msg.source;	/* caller proc nr. */
 	assert(name_len < MAX_PATH);
@@ -43,7 +33,7 @@ PUBLIC int do_exec()
 		  name_len);
 	pathname[name_len] = 0;	/* terminate the string */
 
-	/* get the file size */
+	/* 获取文件大小 */
 	struct stat s;
 	int ret = stat(pathname, &s);
 	if (ret != 0) {
@@ -51,7 +41,7 @@ PUBLIC int do_exec()
 		return -1;
 	}
 
-	/* read the file */
+	/* 读文件 */
 	int fd = open(pathname, O_RDWR);
 	if (fd == -1)
 		return -1;
@@ -59,7 +49,7 @@ PUBLIC int do_exec()
 	read(fd, mmbuf, s.st_size);
 	close(fd);
 
-	/* overwrite the current proc image with the new one */
+	/* 用新的进程映像覆盖当前进程映像 */
 	Elf32_Ehdr* elf_hdr = (Elf32_Ehdr*)(mmbuf);
 	int i;
 	for (i = 0; i < elf_hdr->e_phnum; i++) {
@@ -75,7 +65,7 @@ PUBLIC int do_exec()
 		}
 	}
 
-	/* setup the arg stack */
+	/* 设置arg堆栈 */
 	int orig_stack_len = mm_msg.BUF_LEN;
 	char stackcopy[PROC_ORIGIN_STACK];
 	phys_copy((void*)va2la(TASK_MM, stackcopy),
@@ -100,7 +90,7 @@ PUBLIC int do_exec()
 	proc_table[src].regs.ecx = argc; /* argc */
 	proc_table[src].regs.eax = (u32)orig_stack; /* argv */
 
-	/* setup eip & esp */
+	/* 设置eip和esp */
 	proc_table[src].regs.eip = elf_hdr->e_entry; /* @see _start.asm */
 	proc_table[src].regs.esp = PROC_IMAGE_SIZE_DEFAULT - PROC_ORIGIN_STACK;
 
