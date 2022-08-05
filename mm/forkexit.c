@@ -108,7 +108,7 @@ PUBLIC int do_fork()
 	/* 将子进程PID将返回到父进程 */
 	mm_msg.PID = child_pid;
 
-	/* 生存子进程 */
+	/* 生成子进程 */
 	MESSAGE m;
 	m.type = SYSCALL_RET;
 	m.RETVAL = 0;
